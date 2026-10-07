@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#173b32">
+  <title>公主丛林冒险：拯救王子</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #173b32;
+      --leaf: #326c4d;
+      --lime: #c8ed77;
+      --coral: #f47c5b;
+      --paper: #fff8e9;
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      color: var(--ink);
+      background:
+        radial-gradient(ellipse at 15% 18%, rgba(255, 222, 135, .85), transparent 28%),
+        radial-gradient(ellipse at 88% 78%, rgba(110, 178, 121, .5), transparent 32%),
+        repeating-linear-gradient(135deg, rgba(23, 59, 50, .035) 0 2px, transparent 2px 14px),
+        #e8f1cd;
+      font-family: "Trebuchet MS", "Microsoft YaHei", sans-serif;
+    }
+    .game-shell { width: min(100%, 1040px); }
+    .topbar {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 0 4px 12px;
+    }
+    .eyebrow { margin: 0 0 5px; color: #4f795d; font-size: 11px; font-weight: 900; letter-spacing: 1.8px; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(20px, 4vw, 30px); line-height: 1.15; }
+    .score {
+      min-width: 120px;
+      padding: 9px 14px;
+      border: 2px solid var(--ink);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: 3px 3px 0 var(--ink);
+      font-weight: 900;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .score span { color: #be7319; }
+    .canvas-frame {
+      position: relative;
+      overflow: hidden;
+      border: 4px solid var(--ink);
+      border-radius: 10px;
+      background: #8fd5c1;
+      box-shadow: 8px 8px 0 rgba(23, 59, 50, .22);
+    }
+    canvas { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; }
+    .hint {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      padding: 7px 10px;
+      border: 1px solid rgba(23, 59, 50, .3);
+      border-radius: 5px;
+      color: var(--ink);
+      background: rgba(255, 248, 233, .83);
+      font-size: 12px;
+      font-weight: 800;
+      pointer-events: none;
+    }
+    .bottomrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 4px 0; }
+    .objective { margin: 0; color: #315844; font-size: 14px; font-weight: 800; }
+    button {
+      min-width: 42px;
+      min-height: 40px;
+      border: 2px solid var(--ink);
+      border-radius: 6px;
+      color: var(--ink);
+      background: var(--paper);
+      box-shadow: 2px 2px 0 var(--ink);
+      font: inherit;
+      font-size: 18px;
+      font-weight: 900;
+      cursor: pointer;
+      touch-action: none;
+    }
+    button:active { transform: translate(2px, 2px); box-shadow: none; }
+    .controls { display: flex; gap: 8px; }
+    .controls .jump { padding: 0 14px; background: var(--lime); font-size: 13px; }
+    .restart { margin-left: 8px; font-size: 15px; }
+    @media (min-width: 700px) { .controls { display: none; } }
+    @media (max-width: 520px) {
+      body { padding: 14px 10px; }
+      .topbar { align-items: center; }
+      .score { min-width: 92px; padding: 7px 9px; font-size: 13px; }
+      .bottomrow { align-items: flex-start; flex-wrap: wrap; }
+      .objective { max-width: 66%; font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="game-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">A little jungle quest</p>
+        <h1>公主丛林冒险 <span aria-hidden="true">✦</span> 拯救王子</h1>
+      </div>
+      <div class="score" aria-live="polite">宝石 <span id="score">0</span> / 8</div>
+    </header>
+    <div class="canvas-frame">
+      <canvas id="game" width="960" height="540" aria-label="公主丛林平台跳跃游戏"></canvas>
+      <div class="hint">← → 移动　·　空格跳跃</div>
+    </div>
+    <div class="bottomrow">
+      <p class="objective" id="message">收集宝石，越过荆棘，去终点救出王子！</p>
+      <div class="controls" aria-label="触屏操作">
+        <button type="button" data-key="ArrowLeft" aria-label="向左">←</button>
+        <button type="button" data-key="ArrowRight" aria-label="向右">→</button>
+        <button class="jump" type="button" data-key="Space">跳跃</button>
+      </div>
+      <button class="restart" id="restart" type="button" title="重新开始" aria-label="重新开始">↻</button>
+    </div>
+  </main>
+  <script>
+    (() => {
+      "use strict";
+      const canvas = document.querySelector("#game");
+      const ctx = canvas.getContext("2d");
+      const scoreLabel = document.querySelector("#score");
+      const message = document.querySelector("#message");
+      const width = canvas.width;
+      const height = canvas.height;
+      const worldWidth = 2820;
+      const gravity = 1850;
+      const keys = new Set();
+      const platforms = [
+        { x: 0, y: 466, w: 520 }, { x: 590, y: 466, w: 470 },
+        { x: 1130, y: 466, w: 520 }, { x: 1720, y: 466, w: 480 },
+        { x: 2270, y: 466, w: 550 },
+        { x: 390, y: 376, w: 150 }, { x: 760, y: 365, w: 170 },
+        { x: 1320, y: 378, w: 175 }, { x: 1900, y: 360, w: 170 },
+        { x: 2410, y: 380, w: 170 }
+      ];
+      const thorns = [
+        { x: 252, y: 444, w: 44, h: 22 }, { x: 660, y: 444, w: 44, h: 22 },
+        { x: 1037, y: 444, w: 44, h: 22 }, { x: 1209, y: 444, w: 44, h: 22 },
+        { x: 1610, y: 444, w: 44, h: 22 }, { x: 1817, y: 444, w: 44, h: 22 },
+        { x: 2173, y: 444, w: 44, h: 22 }, { x: 2328, y: 444, w: 44, h: 22 }
+      ];
+      const gems = [
+        { x: 170, y: 415 }, { x: 465, y: 328 }, { x: 820, y: 316 }, { x: 970, y: 414 },
+        { x: 1390, y: 329 }, { x: 1510, y: 414 }, { x: 1980, y: 311 }, { x: 2490, y: 333 }
+      ].map(gem => ({ ...gem, found: false, phase: Math.random() * Math.PI * 2 }));
+      const clouds = Array.from({ length: 7 }, (_, index) => ({
+        x: index * 185 + 30, y: 60 + (index % 3) * 47, scale: .7 + (index % 3) * .16
+      }));
+      const player = { x: 58, y: 400, w: 30, h: 48, vx: 0, vy: 0, grounded: false, face: 1 };
+      const prince = { x: 2670, y: 408 };
+      let cameraX = 0;
+      let score = 0;
+      let checkpointX = 58;
+      let won = false;
+      let lastTime = 0;
+      let elapsed = 0;
+
+      function roundedRect(x, y, w, h, r, color) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, r);
+        ctx.fill();
+      }
+
+      function drawCloud(x, y, scale) {
+        ctx.fillStyle = "rgba(255,255,238,.82)";
+        ctx.beginPath();
+        ctx.ellipse(x, y, 34 * scale, 13 * scale, 0, 0, Math.PI * 2);
+        ctx.ellipse(x - 17 * scale, y + 1 * scale, 17 * scale, 12 * scale, 0, 0, Math.PI * 2);
+        ctx.ellipse(x + 14 * scale, y - 5 * scale, 20 * scale, 16 * scale, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      function drawTree(x, y, scale, color) {
+        ctx.fillStyle = "#725741";
+        ctx.fillRect(x - 8 * scale, y, 16 * scale, 128 * scale);
+        ctx.fillStyle = color;
+        for (let leaf = 0; leaf < 5; leaf++) {
+          const angle = leaf * Math.PI * .4;
+          ctx.beginPath();
+          ctx.ellipse(x + Math.cos(angle) * 24 * scale, y - 14 * scale + Math.sin(angle) * 18 * scale,
+            30 * scale, 15 * scale, angle, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.beginPath();
+        ctx.arc(x, y - 12 * scale, 24 * scale, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      function drawBackground() {
+        const sky = ctx.createLinearGradient(0, 0, 0, height);
+        sky.addColorStop(0, "#8ad8c9");
+        sky.addColorStop(.68, "#d2edb3");
+        sky.addColorStop(1, "#f4e6a5");
+        ctx.fillStyle = sky;
+        ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = "rgba(255,236,155,.75)";
+        ctx.beginPath();
+        ctx.arc(790, 104, 43, 0, Math.PI * 2);
+        ctx.fill();
+        clouds.forEach(cloud => {
+          const travel = (elapsed * 12 + cloud.x) % (width + 110);
+          drawCloud(travel - 50, cloud.y, cloud.scale);
+        });
+        ctx.fillStyle = "#8ec18d";
+        ctx.beginPath();
+        ctx.moveTo(0, 360);
+        for (let x = 0; x <= width; x += 100) ctx.quadraticCurveTo(x + 50, 304 + Math.sin(x) * 16, x + 100, 360);
+        ctx.lineTo(width, height); ctx.lineTo(0, height); ctx.fill();
+        ctx.save();
+        ctx.translate(-cameraX * .22, 0);
+        for (let x = -150; x < worldWidth + 250; x += 260) {
+          drawTree(x, 318 + (Math.sin(x) + 1) * 14, .68, x % 2 ? "#548c63" : "#63996a");
+        }
+        ctx.restore();
+        ctx.save();
+        ctx.translate(-cameraX * .48, 0);
+        for (let x = -120; x < worldWidth + 220; x += 330) {
+          drawTree(x, 365, .9, x % 2 ? "#326c4d" : "#3c7952");
+        }
+        ctx.restore();
+      }
+
+      function drawPlatform(platform) {
+        ctx.fillStyle = "#875a3f";
+        ctx.fillRect(platform.x, platform.y, platform.w, height - platform.y + 50);
+        ctx.fillStyle = "#477c48";
+        ctx.fillRect(platform.x, platform.y, platform.w, 12);
+        ctx.fillStyle = "#89ad55";
+        for (let tuft = 8; tuft < platform.w; tuft += 34) {
+          ctx.beginPath();
+          ctx.moveTo(platform.x + tuft, platform.y + 2);
+          ctx.lineTo(platform.x + tuft + 5, platform.y - 5);
+          ctx.lineTo(platform.x + tuft + 9, platform.y + 2);
+          ctx.fill();
+        }
+      }
+
+      function drawThorn(thorn) {
+        ctx.fillStyle = "#536c37";
+        ctx.fillRect(thorn.x, thorn.y + thorn.h - 5, thorn.w, 6);
+        const count = Math.ceil(thorn.w / 16);
+        for (let index = 0; index < count; index++) {
+          const x = thorn.x + index * 16;
+          ctx.fillStyle = index % 2 ? "#db5e51" : "#ef7657";
+          ctx.beginPath();
+          ctx.moveTo(x, thorn.y + thorn.h);
+          ctx.quadraticCurveTo(x + 5, thorn.y + 4, x + 11, thorn.y + thorn.h);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = "#fff0ca";
+          ctx.beginPath();
+          ctx.arc(x + 7, thorn.y + 16, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      function drawGem(gem) {
+        if (gem.found) return;
+        const bob = Math.sin(elapsed * 4 + gem.phase) * 4;
+        ctx.save();
+        ctx.translate(gem.x, gem.y + bob);
+        ctx.rotate(Math.sin(elapsed * 2 + gem.phase) * .12);
+        ctx.fillStyle = "#ffe66b";
+        ctx.strokeStyle = "#bd7a27";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, -13); ctx.lineTo(11, -3); ctx.lineTo(7, 11); ctx.lineTo(-7, 11); ctx.lineTo(-11, -3);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = "rgba(255,255,255,.75)";
+        ctx.beginPath(); ctx.moveTo(-5, -3); ctx.lineTo(0, -9); ctx.lineTo(0, 5); ctx.closePath(); ctx.fill();
+        ctx.restore();
+      }
+
+      function drawPrincess() {
+        const x = player.x + player.w / 2;
+        const y = player.y;
+        const stride = player.grounded ? Math.sin(elapsed * 15) * Math.min(2, Math.abs(player.vx) / 90) : 0;
+        ctx.save();
+        ctx.translate(x, y);
+        if (player.face < 0) ctx.scale(-1, 1);
+        ctx.fillStyle = "#df6581";
+        ctx.beginPath();
+        ctx.moveTo(-10, 25); ctx.quadraticCurveTo(-23, 37, -18, 47);
+        ctx.lineTo(18, 47); ctx.quadraticCurveTo(22, 34, 9, 25); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "#f6bd87";
+        ctx.fillRect(-4, 17, 9, 10);
+        ctx.fillStyle = "#f8c896";
+        ctx.beginPath(); ctx.arc(1, 12, 12, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#633d40";
+        ctx.beginPath(); ctx.arc(0, 9, 13, Math.PI, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(-9, 20, 5, 14, -.25, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#173b32";
+        ctx.beginPath(); ctx.arc(5, 13, 1.5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#ee7581";
+        ctx.beginPath(); ctx.arc(10, 17, 2.1, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#ffdd62";
+        ctx.beginPath(); ctx.moveTo(-8, 1); ctx.lineTo(-5, -9); ctx.lineTo(0, -3); ctx.lineTo(5, -11); ctx.lineTo(9, 1); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "#fff2b3";
+        ctx.beginPath(); ctx.arc(-5, -3, 1.4, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#f8c896"; ctx.lineWidth = 4; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(-8, 29); ctx.lineTo(-12, 37 + stride); ctx.moveTo(8, 29); ctx.lineTo(12, 37 - stride); ctx.stroke();
+        ctx.fillStyle = "#554765";
+        ctx.fillRect(-10, 44 + stride, 8, 4); ctx.fillRect(3, 44 - stride, 8, 4);
+        ctx.restore();
+      }
+
+      function drawPrince() {
+        const x = prince.x;
+        const y = prince.y;
+        ctx.fillStyle = "rgba(23,59,50,.13)";
+        ctx.beginPath(); ctx.ellipse(x, 464, 37, 8, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#4f79a1";
+        ctx.beginPath(); ctx.moveTo(x - 12, y + 22); ctx.lineTo(x - 21, y + 50); ctx.lineTo(x + 21, y + 50); ctx.lineTo(x + 12, y + 22); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "#f4c28d";
+        ctx.beginPath(); ctx.arc(x, y + 8, 13, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#815b42";
+        ctx.beginPath(); ctx.arc(x, y + 3, 13, Math.PI, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#173b32";
+        ctx.beginPath(); ctx.arc(x + 5, y + 9, 1.5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#f4d24f";
+        ctx.beginPath(); ctx.moveTo(x - 8, y - 4); ctx.lineTo(x - 5, y - 14); ctx.lineTo(x, y - 7); ctx.lineTo(x + 5, y - 14); ctx.lineTo(x + 9, y - 4); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = "#dce8df"; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(x + 21, y + 27); ctx.lineTo(x + 37, y + 3); ctx.stroke();
+        ctx.strokeStyle = "#d5a33d"; ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.moveTo(x + 17, y + 30); ctx.lineTo(x + 25, y + 34); ctx.stroke();
+        ctx.fillStyle = "#fff4ce"; ctx.font = "bold 14px Trebuchet MS"; ctx.textAlign = "center";
+        ctx.fillText("救救我！", x, y - 28 + Math.sin(elapsed * 3) * 3);
+      }
+
+      function drawCheckpoint() {
+        const flagX = 1165;
+        ctx.fillStyle = "#7d593a";
+        ctx.fillRect(flagX, 386, 5, 80);
+        ctx.fillStyle = checkpointX > 58 ? "#ffda61" : "#ef8564";
+        ctx.beginPath(); ctx.moveTo(flagX + 5, 390); ctx.lineTo(flagX + 39, 400); ctx.lineTo(flagX + 5, 411); ctx.closePath(); ctx.fill();
+      }
+
+      function overlap(a, b) {
+        return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+      }
+
+      function resetPlayer(penalty = true) {
+        player.x = checkpointX;
+        player.y = 400;
+        player.vx = 0;
+        player.vy = 0;
+        player.grounded = false;
+        if (penalty) {
+          score = Math.max(0, score - 1);
+          updateScore();
+          message.textContent = "哎呀，碰到荆棘了！少了 1 颗宝石，再试一次。";
+        }
+      }
+
+      function updateScore() {
+        scoreLabel.textContent = score;
+      }
+
+      function update(dt) {
+        if (won) return;
+        const direction = Number(keys.has("ArrowRight") || keys.has("KeyD")) - Number(keys.has("ArrowLeft") || keys.has("KeyA"));
+        const targetSpeed = direction * 250;
+        player.vx += (targetSpeed - player.vx) * Math.min(1, dt * (player.grounded ? 13 : 5));
+        if (Math.abs(player.vx) < 2) player.vx = 0;
+        if (direction) player.face = direction;
+        const previousX = player.x;
+        player.x += player.vx * dt;
+        for (const platform of platforms) {
+          if (platform.y >= 430 || player.y + player.h <= platform.y || player.y >= height) continue;
+          if (previousX + player.w <= platform.x && player.x + player.w > platform.x) {
+            player.x = platform.x - player.w;
+          } else if (previousX >= platform.x + platform.w && player.x < platform.x + platform.w) {
+            player.x = platform.x + platform.w;
+          }
+        }
+        player.x = Math.max(0, Math.min(worldWidth - player.w, player.x));
+
+        if ((keys.has("Space") || keys.has("ArrowUp") || keys.has("KeyW")) && player.grounded) {
+          player.vy = -680;
+          player.grounded = false;
+        }
+        player.vy += gravity * dt;
+        const previousBottom = player.y + player.h;
+        player.y += player.vy * dt;
+        player.grounded = false;
+        if (player.vy >= 0) {
+          for (const platform of platforms) {
+            if (previousBottom <= platform.y && player.y + player.h >= platform.y &&
+                player.x + player.w > platform.x && player.x < platform.x + platform.w) {
+              player.y = platform.y - player.h;
+              player.vy = 0;
+              player.grounded = true;
+            }
+          }
+        }
+
+        const playerBox = { x: player.x + 4, y: player.y + 3, w: player.w - 8, h: player.h - 5 };
+        for (const thorn of thorns) {
+          if (overlap(playerBox, { x: thorn.x + 5, y: thorn.y + 7, w: thorn.w - 10, h: thorn.h - 5 })) {
+            resetPlayer();
+            break;
+          }
+        }
+        if (player.y > height + 100) resetPlayer();
+        if (player.x > 1120 && checkpointX < 1165) {
+          checkpointX = 1165;
+          message.textContent = "到达丛林营地！这里是新的重生点。";
+        }
+        for (const gem of gems) {
+          if (!gem.found && overlap(playerBox, { x: gem.x - 12, y: gem.y - 14, w: 24, h: 28 })) {
+            gem.found = true;
+            score++;
+            updateScore();
+            message.textContent = "宝石 +1！继续向前，王子就在终点。";
+          }
+        }
+        if (player.x + player.w > prince.x - 27 && player.x < prince.x + 30 && player.y + player.h > prince.y) {
+          won = true;
+          message.textContent = `成功救出王子！你收集了 ${score} 颗宝石。`;
+        }
+        cameraX = Math.max(0, Math.min(worldWidth - width, player.x - width * .36));
+      }
+
+      function drawWinOverlay() {
+        if (!won) return;
+        ctx.fillStyle = "rgba(23,59,50,.58)";
+        ctx.fillRect(0, 0, width, height);
+        roundedRect(250, 166, 460, 202, 12, "#fff8e9");
+        ctx.strokeStyle = "#173b32"; ctx.lineWidth = 4; ctx.strokeRect(250, 166, 460, 202);
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#326c4d"; ctx.font = "bold 34px Trebuchet MS";
+        ctx.fillText("王子获救啦！", width / 2, 239);
+        ctx.fillStyle = "#725741"; ctx.font = "bold 19px Trebuchet MS";
+        ctx.fillText(`收集宝石：${score} / 8`, width / 2, 278);
+        ctx.font = "15px Trebuchet MS";
+        ctx.fillText("点击 ↻ 再玩一次", width / 2, 322);
+      }
+
+      function render() {
+        drawBackground();
+        ctx.save();
+        ctx.translate(-cameraX, 0);
+        platforms.forEach(drawPlatform);
+        drawCheckpoint();
+        thorns.forEach(drawThorn);
+        gems.forEach(drawGem);
+        drawPrince();
+        drawPrincess();
+        ctx.restore();
+        drawWinOverlay();
+      }
+
+      function frame(time) {
+        const dt = Math.min((time - lastTime) / 1000 || 0, .033);
+        lastTime = time;
+        elapsed += dt;
+        update(dt);
+        render();
+        requestAnimationFrame(frame);
+      }
+
+      function keyDown(event) {
+        if (["ArrowLeft", "ArrowRight", "ArrowUp", "Space"].includes(event.code)) event.preventDefault();
+        keys.add(event.code);
+      }
+
+      function restart() {
+        score = 0;
+        checkpointX = 58;
+        won = false;
+        gems.forEach(gem => { gem.found = false; });
+        updateScore();
+        message.textContent = "收集宝石，越过荆棘，去终点救出王子！";
+        resetPlayer(false);
+      }
+
+      window.addEventListener("keydown", keyDown);
+      window.addEventListener("keyup", event => keys.delete(event.code));
+      window.addEventListener("blur", () => keys.clear());
+      document.querySelector("#restart").addEventListener("click", restart);
+      document.querySelectorAll("[data-key]").forEach(button => {
+        const code = button.dataset.key;
+        button.addEventListener("pointerdown", event => { event.preventDefault(); keys.add(code); button.setPointerCapture(event.pointerId); });
+        button.addEventListener("pointerup", () => keys.delete(code));
+        button.addEventListener("pointercancel", () => keys.delete(code));
+        button.addEventListener("lostpointercapture", () => keys.delete(code));
+      });
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
